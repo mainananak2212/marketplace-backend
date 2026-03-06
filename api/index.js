@@ -18,7 +18,7 @@ function log(platform, message, data = null) {
   console.log(`[${platform}] ${message}`, data ? JSON.stringify(data).substring(0, 200) : '');
 }
 
-// ===================== SHOPEE (UPDATED SELECTOR) =====================
+// ===================== SHOPEE =====================
 async function scrapeShopee(keyword) {
   let browser = null;
   try {
@@ -32,80 +32,28 @@ async function scrapeShopee(keyword) {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
-    // Set timeout lebih panjang
     await page.goto(`https://shopee.co.id/search?keyword=${encodeURIComponent(keyword)}`, {
       waitUntil: 'networkidle2',
       timeout: 15000,
     });
 
-    // Coba beberapa selector alternatif
-    const selectors = [
-      '[data-sqe="item"]',
-      '.shopee-search-item-result__item',
-      '.col-xs-2-4',
-      '.row.shopee-search-item-result__items .col-xs-2-4'
-    ];
-
-    let found = false;
-    for (const selector of selectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 5000 });
-        log('Shopee', `Selector ditemukan: ${selector}`);
-        found = true;
-        break;
-      } catch (e) {
-        log('Shopee', `Selector tidak ditemukan: ${selector}`);
-      }
-    }
-
-    if (!found) {
-      log('Shopee', 'Tidak ada selector yang cocok');
-      return null;
-    }
+    await page.waitForSelector('li[data-sqe="item"]', { timeout: 10000 });
+    log('Shopee', 'Selector item ditemukan');
 
     const products = await page.evaluate(() => {
-      // Coba berbagai kemungkinan selector item
-      const possibleItemSelectors = [
-        '[data-sqe="item"]',
-        '.shopee-search-item-result__item',
-        '.col-xs-2-4'
-      ];
-      
-      let items = [];
-      for (const sel of possibleItemSelectors) {
-        const found = document.querySelectorAll(sel);
-        if (found.length > 0) {
-          items = found;
-          break;
-        }
-      }
-
+      const items = document.querySelectorAll('li[data-sqe="item"]');
       return Array.from(items).slice(0, 5).map(item => {
-        // Coba berbagai selector untuk nama
-        const nameSelectors = ['.ZEgDH9', '.CDDksN', 'div[data-sqe="name"]', '.product-name'];
-        let name = '';
-        for (const sel of nameSelectors) {
-          const el = item.querySelector(sel);
-          if (el) {
-            name = el.innerText;
-            break;
-          }
-        }
+        const nameEl = item.querySelector('.whitespace-normal.line-clamp-2');
+        const name = nameEl ? nameEl.innerText.trim() : '';
 
-        // Selector harga
-        const priceSelectors = ['.HP1U1L', '.ZEgDH9', '.price', 'span[data-sqe="price"]'];
-        let price = '0';
-        for (const sel of priceSelectors) {
-          const el = item.querySelector(sel);
-          if (el) {
-            price = el.innerText;
-            break;
-          }
-        }
+        const priceEl = item.querySelector('.truncate.flex.items-baseline .truncate.text-base\\/5.font-medium');
+        const price = priceEl ? priceEl.innerText.trim() : '0';
 
-        // Link dan gambar
-        const link = item.querySelector('a')?.href || '';
-        const image = item.querySelector('img')?.src || '';
+        const linkEl = item.querySelector('a[href*="/"]');
+        const link = linkEl ? linkEl.href : '';
+
+        const imgEl = item.querySelector('img');
+        const image = imgEl ? imgEl.src : '';
 
         return { name, price, link, image };
       });
@@ -114,7 +62,6 @@ async function scrapeShopee(keyword) {
     log('Shopee', `Produk ditemukan: ${products.length}`);
 
     if (products.length === 0) {
-      // Fallback data dummy untuk testing
       return {
         name: `Laptop Gaming di Shopee (Contoh)`,
         price: 12999000,
@@ -142,7 +89,6 @@ async function scrapeShopee(keyword) {
     };
   } catch (err) {
     log('Shopee', 'Error:', err.message);
-    // Return dummy data jika error
     return {
       name: `Laptop ASUS ROG (Contoh)`,
       price: 15999000,
@@ -155,7 +101,7 @@ async function scrapeShopee(keyword) {
   }
 }
 
-// ===================== TOKOPEDIA (UPDATED) =====================
+// ===================== TOKOPEDIA =====================
 async function scrapeTokopedia(keyword) {
   let browser = null;
   try {
@@ -174,51 +120,38 @@ async function scrapeTokopedia(keyword) {
       timeout: 15000,
     });
 
-    // Selector terbaru Tokopedia
-    const selectors = [
-      '.css-12sieg3',
-      '[data-testid="lstCL2ProductList"]',
-      '.unf-product',
-      '.pcv3__container'
-    ];
-
-    let found = false;
-    for (const selector of selectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 5000 });
-        log('Tokopedia', `Selector ditemukan: ${selector}`);
-        found = true;
-        break;
-      } catch (e) {
-        log('Tokopedia', `Selector tidak ditemukan: ${selector}`);
-      }
-    }
-
-    if (!found) {
-      return {
-        name: `Laptop Lenovo (Contoh Tokopedia)`,
-        price: 11499000,
-        image: 'https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?w=400',
-        link: 'https://tokopedia.com',
-        affiliateLink: 'https://tokopedia.com?af=marketfind2025'
-      };
-    }
+    await page.waitForSelector('.css-5wh65g', { timeout: 10000 });
+    log('Tokopedia', 'Selector item ditemukan');
 
     const products = await page.evaluate(() => {
-      const items = document.querySelectorAll('.css-12sieg3, [data-testid="lstCL2ProductList"]');
+      const items = document.querySelectorAll('.css-5wh65g');
       return Array.from(items).slice(0, 5).map(item => {
-        const name = item.querySelector('.prd_link-product-name, .unf-product__name')?.innerText || '';
-        const price = item.querySelector('.prd_link-product-price, .unf-product__price')?.innerText || '0';
-        const link = item.querySelector('a')?.href || '';
-        const image = item.querySelector('img')?.src || '';
+        const nameContainer = item.querySelector('[class*="SzILjt4fxHUFNVT48ZPhHA"]');
+        let name = '';
+        if (nameContainer) {
+          const span = nameContainer.querySelector('span');
+          if (span) name = span.innerText.trim();
+        }
+
+        const priceEl = item.querySelector('[class*="urMOIDHH7I0Iy1Dv2oFaNw"]');
+        const price = priceEl ? priceEl.innerText.trim() : '0';
+
+        const linkEl = item.querySelector('a[href*="tokopedia.com"]');
+        const link = linkEl ? linkEl.href : '';
+
+        const imgEl = item.querySelector('img[alt="product-image"]');
+        const image = imgEl ? imgEl.src : '';
+
         return { name, price, link, image };
       });
     });
 
+    log('Tokopedia', `Produk ditemukan: ${products.length}`);
+
     if (products.length === 0) {
       return {
-        name: `Laptop HP Pavilion (Contoh)`,
-        price: 12499000,
+        name: `Laptop Lenovo (Contoh Tokopedia)`,
+        price: 11499000,
         image: 'https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?w=400',
         link: 'https://tokopedia.com',
         affiliateLink: 'https://tokopedia.com?af=marketfind2025'
@@ -255,11 +188,11 @@ async function scrapeTokopedia(keyword) {
   }
 }
 
-// ===================== LAZADA (UPDATED) =====================
+// ===================== LAZADA (UPDATED SELECTOR) =====================
 async function scrapeLazada(keyword) {
   let browser = null;
   try {
-    log('Lazada', 'Memulai scraping...');
+    log('Lazada', 'Memulai scraping dengan selector terbaru...');
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath,
@@ -274,6 +207,7 @@ async function scrapeLazada(keyword) {
       timeout: 15000,
     });
 
+    // Daftar selector yang mungkin muncul (termasuk yang terbaru)
     const selectors = [
       '.Bm3ON',
       '[data-qa-locator="product-item"]',
@@ -303,16 +237,32 @@ async function scrapeLazada(keyword) {
       };
     }
 
+    // Evaluasi produk dengan selector yang sudah diidentifikasi dari struktur HTML terbaru
     const products = await page.evaluate(() => {
+      // Gunakan selector container yang paling umum
       const items = document.querySelectorAll('.Bm3ON, [data-qa-locator="product-item"]');
       return Array.from(items).slice(0, 5).map(item => {
-        const name = item.querySelector('.RfADt, .c16H9d')?.innerText || '';
-        const price = item.querySelector('.ooOxS, .c13VH6')?.innerText || '0';
-        const link = item.querySelector('a')?.href || '';
-        const image = item.querySelector('img')?.src || '';
+        // Nama produk: cari di .RfADt a, prioritaskan atribut title
+        const nameLink = item.querySelector('.RfADt a');
+        const name = nameLink ? (nameLink.title || nameLink.innerText.trim()) : '';
+
+        // Harga
+        const priceEl = item.querySelector('.ooOxS');
+        const price = priceEl ? priceEl.innerText.trim() : '0';
+
+        // Link produk
+        const linkEl = item.querySelector('a[href*="/products/"]') || item.querySelector('a');
+        const link = linkEl ? linkEl.href : '';
+
+        // Gambar utama
+        const imgEl = item.querySelector('.picture-wrapper img');
+        const image = imgEl ? imgEl.src : '';
+
         return { name, price, link, image };
       });
     });
+
+    log('Lazada', `Produk ditemukan: ${products.length}`);
 
     if (products.length === 0) {
       return {
