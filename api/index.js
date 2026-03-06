@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const chromium = require('@sparticuz/chrome-aws-lambda');
-const puppeteer = require('puppeteer-core');
 
 const app = express();
 app.use(cors());
@@ -13,7 +12,7 @@ function extractPrice(priceStr) {
   return parseInt(cleaned, 10) || 0;
 }
 
-// Helper untuk logging (standar)
+// Helper untuk logging
 function log(platform, message, data = null) {
   console.log(`[${platform}] ${message}`, data ? JSON.stringify(data).substring(0, 200) : '');
 }
@@ -57,16 +56,34 @@ async function setupPage(page) {
   });
 }
 
+// Fungsi untuk meluncurkan browser (otomatis menyesuaikan environment)
+async function launchBrowser() {
+  const isVercel = !!process.env.VERCEL;
+  const isLambda = !!process.env.AWS_EXECUTION_ENV;
+
+  if (isVercel || isLambda) {
+    // Di Vercel atau Lambda: gunakan chrome-aws-lambda + puppeteer-core
+    const puppeteer = require('puppeteer-core');
+    return await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+    });
+  } else {
+    // Di lokal: gunakan puppeteer biasa (harus diinstal sebagai devDependency)
+    const puppeteer = require('puppeteer');
+    return await puppeteer.launch({
+      headless: true,
+    });
+  }
+}
+
 // ==================== SHOPEE ====================
 async function scrapeShopee(keyword, logCallback = console.log) {
   let browser = null;
   try {
     logCallback('Memulai scraping Shopee...');
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
+    browser = await launchBrowser();
 
     const page = await browser.newPage();
     await setupPage(page);
@@ -139,11 +156,7 @@ async function scrapeTokopedia(keyword, logCallback = console.log) {
   let browser = null;
   try {
     logCallback('Memulai scraping Tokopedia...');
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
+    browser = await launchBrowser();
 
     const page = await browser.newPage();
     await setupPage(page);
@@ -219,11 +232,7 @@ async function scrapeLazada(keyword, logCallback = console.log) {
   let browser = null;
   try {
     logCallback('Memulai scraping Lazada...');
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
+    browser = await launchBrowser();
 
     const page = await browser.newPage();
     await setupPage(page);
@@ -321,7 +330,6 @@ app.get('/debug', async (req, res) => {
   const logs = { shopee: [], tokopedia: [], lazada: [] };
   const results = {};
 
-  // Fungsi untuk menjalankan scraping dengan koleksi log
   async function runScrape(platform, scrapeFn) {
     const platformLogs = [];
     platformLogs.push(`Memulai scraping ${platform} untuk "${keyword}"`);
@@ -342,7 +350,6 @@ app.get('/debug', async (req, res) => {
     runScrape('lazada', scrapeLazada)
   ]);
 
-  // Buat HTML
   let html = `
   <!DOCTYPE html>
   <html>
@@ -401,7 +408,6 @@ app.get('/api/search', async (req, res) => {
   console.log(`\n=== Mencari: "${keyword}" ===\n`);
 
   try {
-    // Jalankan scraping tanpa retry agar lebih cepat, tapi dengan log ke console
     const [shopee, tokopedia, lazada] = await Promise.allSettled([
       scrapeShopee(keyword, (msg) => log('Shopee', msg)),
       scrapeTokopedia(keyword, (msg) => log('Tokopedia', msg)),
