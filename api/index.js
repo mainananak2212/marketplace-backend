@@ -13,12 +13,12 @@ function extractPrice(priceStr) {
   return parseInt(cleaned, 10) || 0;
 }
 
-// Helper untuk logging
+// Helper untuk logging (standar)
 function log(platform, message, data = null) {
   console.log(`[${platform}] ${message}`, data ? JSON.stringify(data).substring(0, 200) : '');
 }
 
-// Helper untuk data dummy masing-masing platform
+// Helper untuk data dummy
 function getDummy(platform, keyword = 'Laptop') {
   const dummies = {
     shopee: {
@@ -46,7 +46,7 @@ function getDummy(platform, keyword = 'Laptop') {
   return dummies[platform];
 }
 
-// Fungsi untuk mengkonfigurasi page dengan anti-detection
+// Setup halaman dengan anti-deteksi
 async function setupPage(page) {
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
   await page.setExtraHTTPHeaders({
@@ -57,43 +57,20 @@ async function setupPage(page) {
   });
 }
 
-// Fungsi untuk menjalankan scraping dengan retry
-async function scrapeWithRetry(scrapeFn, platform, keyword, retries = 2) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      log(platform, `Percobaan ${i+1}/${retries+1}`);
-      const result = await scrapeFn(keyword);
-      // Jika hasil bukan dummy (tidak mengandung "Contoh") dan ada nama, anggap sukses
-      if (result && result.name && !result.name.includes('Contoh')) {
-        return result;
-      }
-      log(platform, 'Hasil masih dummy, mungkin gagal ekstrak');
-    } catch (error) {
-      log(platform, `Error percobaan ${i+1}:`, error.message);
-    }
-    if (i < retries) {
-      log(platform, `Menunggu 2 detik sebelum percobaan berikutnya...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
-  }
-  log(platform, 'Semua percobaan gagal, mengembalikan data dummy');
-  return getDummy(platform, keyword);
-}
-
-// ===================== SHOPEE =====================
-async function scrapeShopee(keyword) {
+// ==================== SHOPEE ====================
+async function scrapeShopee(keyword, logCallback = console.log) {
   let browser = null;
   try {
-    log('Shopee', 'Memulai scraping...');
+    logCallback('Memulai scraping Shopee...');
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath,
       headless: chromium.headless,
     });
-    
+
     const page = await browser.newPage();
     await setupPage(page);
-    
+
     await page.goto(`https://shopee.co.id/search?keyword=${encodeURIComponent(keyword)}`, {
       waitUntil: 'networkidle2',
       timeout: 20000,
@@ -103,45 +80,44 @@ async function scrapeShopee(keyword) {
     await page.evaluate(() => window.scrollBy(0, window.innerHeight));
     await page.waitForTimeout(2000);
 
+    logCallback('Menunggu selector li[data-sqe="item"]');
     await page.waitForSelector('li[data-sqe="item"]', { timeout: 15000 });
-    log('Shopee', 'Selector item ditemukan');
+    logCallback('Selector item ditemukan');
 
     const products = await page.evaluate(() => {
       const items = document.querySelectorAll('li[data-sqe="item"]');
       return Array.from(items).slice(0, 5).map(item => {
-        // Nama
         const nameEl = item.querySelector('.whitespace-normal.line-clamp-2');
         const name = nameEl ? nameEl.innerText.trim() : '';
-
-        // Harga
         const priceEl = item.querySelector('.truncate.flex.items-baseline .truncate.text-base\\/5.font-medium');
         const price = priceEl ? priceEl.innerText.trim() : '0';
-
-        // Link
         const linkEl = item.querySelector('a[href*="/"]');
         const link = linkEl ? linkEl.href : '';
-
-        // Gambar
         const imgEl = item.querySelector('img');
         const image = imgEl ? imgEl.src : '';
-
         return { name, price, link, image };
       });
     });
 
-    log('Shopee', `Produk ditemukan: ${products.length}`);
+    logCallback(`Produk ditemukan: ${products.length}`);
+    if (products.length > 0) {
+      logCallback(`Contoh produk pertama: ${JSON.stringify(products[0])}`);
+    }
 
     const withPrice = products.map(p => ({
       ...p,
       priceNum: extractPrice(p.price)
     })).filter(p => p.priceNum > 0 && p.name);
 
+    logCallback(`Produk valid setelah filter harga: ${withPrice.length}`);
+
     if (withPrice.length === 0) {
-      log('Shopee', 'Tidak ada produk valid');
+      logCallback('Tidak ada produk valid, mengembalikan null');
       return null;
     }
 
     const cheapest = withPrice.reduce((min, p) => p.priceNum < min.priceNum ? p : min, withPrice[0]);
+    logCallback(`Produk termurah: ${cheapest.name} - Rp ${cheapest.priceNum}`);
 
     return {
       name: cheapest.name,
@@ -151,27 +127,27 @@ async function scrapeShopee(keyword) {
       affiliateLink: cheapest.link + '?af=marketfind2025'
     };
   } catch (err) {
-    log('Shopee', 'Error:', err.message);
+    logCallback(`ERROR: ${err.message}`);
     return null;
   } finally {
     if (browser) await browser.close();
   }
 }
 
-// ===================== TOKOPEDIA =====================
-async function scrapeTokopedia(keyword) {
+// ==================== TOKOPEDIA ====================
+async function scrapeTokopedia(keyword, logCallback = console.log) {
   let browser = null;
   try {
-    log('Tokopedia', 'Memulai scraping...');
+    logCallback('Memulai scraping Tokopedia...');
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath,
       headless: chromium.headless,
     });
-    
+
     const page = await browser.newPage();
     await setupPage(page);
-    
+
     await page.goto(`https://www.tokopedia.com/search?q=${encodeURIComponent(keyword)}`, {
       waitUntil: 'networkidle2',
       timeout: 20000,
@@ -180,49 +156,48 @@ async function scrapeTokopedia(keyword) {
     await page.evaluate(() => window.scrollBy(0, window.innerHeight));
     await page.waitForTimeout(2000);
 
+    logCallback('Menunggu selector .css-5wh65g');
     await page.waitForSelector('.css-5wh65g', { timeout: 15000 });
-    log('Tokopedia', 'Selector item ditemukan');
+    logCallback('Selector item ditemukan');
 
     const products = await page.evaluate(() => {
       const items = document.querySelectorAll('.css-5wh65g');
       return Array.from(items).slice(0, 5).map(item => {
-        // Nama
         const nameContainer = item.querySelector('[class*="SzILjt4fxHUFNVT48ZPhHA"]');
         let name = '';
         if (nameContainer) {
           const span = nameContainer.querySelector('span');
           if (span) name = span.innerText.trim();
         }
-
-        // Harga
         const priceEl = item.querySelector('[class*="urMOIDHH7I0Iy1Dv2oFaNw"]');
         const price = priceEl ? priceEl.innerText.trim() : '0';
-
-        // Link
         const linkEl = item.querySelector('a[href*="tokopedia.com"]');
         const link = linkEl ? linkEl.href : '';
-
-        // Gambar
         const imgEl = item.querySelector('img[alt="product-image"]');
         const image = imgEl ? imgEl.src : '';
-
         return { name, price, link, image };
       });
     });
 
-    log('Tokopedia', `Produk ditemukan: ${products.length}`);
+    logCallback(`Produk ditemukan: ${products.length}`);
+    if (products.length > 0) {
+      logCallback(`Contoh produk pertama: ${JSON.stringify(products[0])}`);
+    }
 
     const withPrice = products.map(p => ({
       ...p,
       priceNum: extractPrice(p.price)
     })).filter(p => p.priceNum > 0 && p.name);
 
+    logCallback(`Produk valid setelah filter harga: ${withPrice.length}`);
+
     if (withPrice.length === 0) {
-      log('Tokopedia', 'Tidak ada produk valid');
+      logCallback('Tidak ada produk valid, mengembalikan null');
       return null;
     }
 
     const cheapest = withPrice.reduce((min, p) => p.priceNum < min.priceNum ? p : min, withPrice[0]);
+    logCallback(`Produk termurah: ${cheapest.name} - Rp ${cheapest.priceNum}`);
 
     return {
       name: cheapest.name,
@@ -232,37 +207,35 @@ async function scrapeTokopedia(keyword) {
       affiliateLink: cheapest.link + '?af=marketfind2025'
     };
   } catch (err) {
-    log('Tokopedia', 'Error:', err.message);
+    logCallback(`ERROR: ${err.message}`);
     return null;
   } finally {
     if (browser) await browser.close();
   }
 }
 
-// ===================== LAZADA =====================
-async function scrapeLazada(keyword) {
+// ==================== LAZADA ====================
+async function scrapeLazada(keyword, logCallback = console.log) {
   let browser = null;
   try {
-    log('Lazada', 'Memulai scraping...');
+    logCallback('Memulai scraping Lazada...');
     browser = await puppeteer.launch({
       args: chromium.args,
       executablePath: await chromium.executablePath,
       headless: chromium.headless,
     });
-    
+
     const page = await browser.newPage();
     await setupPage(page);
-    
+
     await page.goto(`https://www.lazada.co.id/catalog/?q=${encodeURIComponent(keyword)}`, {
       waitUntil: 'networkidle2',
       timeout: 20000,
     });
 
-    // Scroll untuk memicu lazy load
     await page.evaluate(() => window.scrollBy(0, window.innerHeight));
     await page.waitForTimeout(3000);
 
-    // Cari container produk
     const containerSelectors = [
       '.Bm3ON',
       '[data-qa-locator="product-item"]',
@@ -273,58 +246,57 @@ async function scrapeLazada(keyword) {
     let foundContainer = null;
     for (const selector of containerSelectors) {
       try {
+        logCallback(`Mencoba container selector: ${selector}`);
         await page.waitForSelector(selector, { timeout: 5000 });
-        log('Lazada', `Container ditemukan: ${selector}`);
+        logCallback(`Container ditemukan: ${selector}`);
         foundContainer = selector;
         break;
       } catch (e) {
-        log('Lazada', `Container tidak ditemukan: ${selector}`);
+        logCallback(`Container tidak ditemukan: ${selector}`);
       }
     }
 
     if (!foundContainer) {
-      log('Lazada', 'Tidak ada container produk');
+      logCallback('Tidak ada container produk, mengembalikan null');
       return null;
     }
 
     const products = await page.$$eval(foundContainer, (items) => {
       return items.slice(0, 5).map(item => {
-        // Nama
         const nameLink = item.querySelector('.RfADt a');
         let name = '';
         if (nameLink) {
           name = nameLink.title || nameLink.innerText.trim();
         }
-
-        // Harga
         const priceEl = item.querySelector('.ooOxS');
         const price = priceEl ? priceEl.innerText.trim() : '0';
-
-        // Link
         const linkEl = item.querySelector('a[href*="/products/"]') || item.querySelector('a');
         const link = linkEl ? linkEl.href : '';
-
-        // Gambar utama
         const imgEl = item.querySelector('.picture-wrapper img');
         const image = imgEl ? imgEl.src : '';
-
         return { name, price, link, image };
       });
     });
 
-    log('Lazada', `Produk ditemukan: ${products.length}`);
+    logCallback(`Produk ditemukan: ${products.length}`);
+    if (products.length > 0) {
+      logCallback(`Contoh produk pertama: ${JSON.stringify(products[0])}`);
+    }
 
     const withPrice = products.map(p => ({
       ...p,
       priceNum: extractPrice(p.price)
     })).filter(p => p.priceNum > 0 && p.name);
 
+    logCallback(`Produk valid setelah filter harga: ${withPrice.length}`);
+
     if (withPrice.length === 0) {
-      log('Lazada', 'Tidak ada produk valid');
+      logCallback('Tidak ada produk valid, mengembalikan null');
       return null;
     }
 
     const cheapest = withPrice.reduce((min, p) => p.priceNum < min.priceNum ? p : min, withPrice[0]);
+    logCallback(`Produk termurah: ${cheapest.name} - Rp ${cheapest.priceNum}`);
 
     return {
       name: cheapest.name,
@@ -334,14 +306,92 @@ async function scrapeLazada(keyword) {
       affiliateLink: cheapest.link + '?af=marketfind2025'
     };
   } catch (err) {
-    log('Lazada', 'Error:', err.message);
+    logCallback(`ERROR: ${err.message}`);
     return null;
   } finally {
     if (browser) await browser.close();
   }
 }
 
-// ===================== ENDPOINT UTAMA DENGAN RETRY =====================
+// ==================== ROUTE DEBUG HTML ====================
+app.get('/debug', async (req, res) => {
+  const keyword = req.query.q || 'laptop';
+  console.log(`\n=== DEBUG MODE: Mencari "${keyword}" ===\n`);
+
+  const logs = { shopee: [], tokopedia: [], lazada: [] };
+  const results = {};
+
+  // Fungsi untuk menjalankan scraping dengan koleksi log
+  async function runScrape(platform, scrapeFn) {
+    const platformLogs = [];
+    platformLogs.push(`Memulai scraping ${platform} untuk "${keyword}"`);
+    try {
+      const result = await scrapeFn(keyword, (msg) => platformLogs.push(msg));
+      platformLogs.push(`Scraping selesai, hasil: ${result ? 'ada data' : 'tidak ada data'}`);
+      results[platform] = result;
+    } catch (err) {
+      platformLogs.push(`ERROR: ${err.message}`);
+      results[platform] = null;
+    }
+    logs[platform] = platformLogs;
+  }
+
+  await Promise.allSettled([
+    runScrape('shopee', scrapeShopee),
+    runScrape('tokopedia', scrapeTokopedia),
+    runScrape('lazada', scrapeLazada)
+  ]);
+
+  // Buat HTML
+  let html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>Debug Scraping</title>
+    <style>
+      body { font-family: Arial; margin: 20px; background: #f5f5f5; }
+      .platform { background: white; border-radius: 8px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+      h2 { margin-top: 0; text-transform: capitalize; }
+      .product { display: flex; gap: 20px; border-top: 1px solid #eee; padding: 10px 0; }
+      .product img { width: 100px; height: 100px; object-fit: cover; border: 1px solid #ddd; }
+      .dummy { color: orange; font-weight: bold; }
+      .error { color: red; }
+      .log { background: #f0f0f0; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; border-left: 3px solid #888; margin-bottom: 10px; }
+      .info { background: #e8f4fd; padding: 5px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>🔍 Debug Scraping untuk keyword: "${keyword}"</h1>
+    <p><a href="/api/search?q=${encodeURIComponent(keyword)}">Lihat response JSON</a></p>
+  `;
+
+  for (const platform of ['shopee', 'tokopedia', 'lazada']) {
+    const result = results[platform];
+    const platformLogs = logs[platform];
+    html += `<div class="platform">`;
+    html += `<h2>${platform.toUpperCase()}</h2>`;
+    html += `<div class="log">${platformLogs.join('<br>')}</div>`;
+
+    if (result && result.name && !result.name.includes('Contoh')) {
+      html += `<div class="product">`;
+      html += `<img src="${result.image}" alt="${result.name}" onerror="this.src='https://via.placeholder.com/100'">`;
+      html += `<div><strong>${result.name}</strong><br>Harga: Rp ${result.price.toLocaleString()}<br><a href="${result.link}" target="_blank">Link Produk</a> | <a href="${result.affiliateLink}" target="_blank">Link Afiliasi</a></div>`;
+      html += `</div>`;
+    } else if (result) {
+      html += `<div class="product dummy">`;
+      html += `<p><strong>⚠️ DATA DUMMY:</strong> ${result.name} - Rp ${result.price.toLocaleString()}</p>`;
+      html += `</div>`;
+    } else {
+      html += `<p class="error">❌ Tidak ada data (null)</p>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</body></html>`;
+  res.send(html);
+});
+
+// ==================== ENDPOINT UTAMA (JSON) ====================
 app.get('/api/search', async (req, res) => {
   const keyword = req.query.q;
   if (!keyword) {
@@ -351,11 +401,11 @@ app.get('/api/search', async (req, res) => {
   console.log(`\n=== Mencari: "${keyword}" ===\n`);
 
   try {
-    // Jalankan scraping dengan retry untuk masing-masing platform
+    // Jalankan scraping tanpa retry agar lebih cepat, tapi dengan log ke console
     const [shopee, tokopedia, lazada] = await Promise.allSettled([
-      scrapeWithRetry(scrapeShopee, 'shopee', keyword),
-      scrapeWithRetry(scrapeTokopedia, 'tokopedia', keyword),
-      scrapeWithRetry(scrapeLazada, 'lazada', keyword)
+      scrapeShopee(keyword, (msg) => log('Shopee', msg)),
+      scrapeTokopedia(keyword, (msg) => log('Tokopedia', msg)),
+      scrapeLazada(keyword, (msg) => log('Lazada', msg))
     ]);
 
     const result = {
@@ -379,6 +429,7 @@ if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
     console.log(`Server berjalan di http://localhost:${PORT}`);
+    console.log(`Gunakan /debug?q=laptop untuk melihat hasil dalam HTML`);
   });
 }
 
