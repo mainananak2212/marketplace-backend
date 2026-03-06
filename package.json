@@ -1,0 +1,15 @@
+{
+  "name": "marketplace-backend",
+  "version": "1.0.0",
+  "description": "Backend untuk scraping harga termurah di marketplace",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "puppeteer-core": "^21.6.0",
+    "chrome-aws-lambda": "^10.1.0"
+  }
+}
